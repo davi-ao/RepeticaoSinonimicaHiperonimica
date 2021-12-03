@@ -1,1 +1,1 @@
-"# Tratamento de Repetiá∆o Lexical Sinon°mica e Hiperon°mica na Construá∆o de Redes SemÉnticas de Cliques" 
+# Tratamento de Repeti√ß√£o Lexical Sinon√≠mica e Hiperon√≠mica na Constru√ß√£o de Redes Sem√¢nticas de Cliques
