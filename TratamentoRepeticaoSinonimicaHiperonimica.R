@@ -1,6 +1,6 @@
-#############################################
-# MODELAGEM DA REPETIÇÃO LEXICAL - versão 6 #
-#############################################
+############################################################
+# TRATAMENTO DA REPETIÇÃO LEXICAL SINONÍICA E HIPERONÍMICA #
+############################################################
 
 # Carregar pacotes utilizados
 library(tidyverse)

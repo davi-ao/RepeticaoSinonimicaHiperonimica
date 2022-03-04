@@ -1,0 +1,28 @@
+---
+title: "Network Construction-Integration"
+output:
+  html_notebook:
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '5'
+    latex_engine: xelatex
+bibliography: references.bib
+csl: instituto-brasileiro-de-informacao-em-ciencia-e-tecnologia-abnt-initials.csl
+---
+
+# Introduction
+
+The method described and implemented in this file is a reading model based on the Construction-Integration (CI) framework [@Kintsch1998]. The present method expands the CI framework with the implementation of network analysis of texts in the construction of semantic representations, substituting the use of manually constructed propositions.
+
+```{r include=FALSE}
+# Load the necessary packages
+library(tidyverse)
+library(igraph)
+
+text = read_file('NCI_text1.txt')
+```
+
+# References
