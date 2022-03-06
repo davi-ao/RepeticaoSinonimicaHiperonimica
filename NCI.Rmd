@@ -15,14 +15,288 @@ csl: instituto-brasileiro-de-informacao-em-ciencia-e-tecnologia-abnt-initials.cs
 
 # Introduction
 
-The method described and implemented in this file is a reading model based on the Construction-Integration (CI) framework [@Kintsch1998]. The present method expands the CI framework with the implementation of network analysis of texts in the construction of semantic representations, substituting the use of manually constructed propositions.
+The method described and implemented in this file comprises the steps for implementing a reading model based on the Construction-Integration (CI) framework \[@Kintsch1998\] using the programming language and environment R [@R]. The present method expands the CI framework with the implementation of network analysis of texts in the construction of semantic representations, substituting the use of manually constructed propositions.
 
 ```{r include=FALSE}
 # Load the necessary packages
+# It may be necessary to install these packages first
 library(tidyverse)
+library(udpipe)
+library(wordnet)
 library(igraph)
+library(ggraph)
 
+# Donwload and load the english-ewt model for udpipe package
+model_ewt = udpipe_download_model(language = 'english-ewt')
+
+m_eng = udpipe_load_model(model_ewt$file_model)
+
+# Configure wordnet dictionary
+setDict('wn3.1.dict/dict/')
+
+# Define helper functions
+get_words_synonyms = function(words, POS) {
+  synonyms_list = mapply(function(w, p) {
+    if (p %in% c('NUM', 'PROPN', 'PRON')) {
+      return()
+    } else {
+      pos_f = p
+      
+      if (p == 'ADJ') {
+        pos_f = 'ADJECTIVE'
+      } else if (p == 'ADV') {
+        pos_f = 'ADVERB'
+      }
+      
+      synonyms(w, pos_f)
+    }
+  }, words, POS)
+  
+  synonyms_tibble = tibble(lemma = names(synonyms_list),
+                           synonyms = synonyms_list %>%
+                             sapply(function(s) {
+                               paste(s,
+                                     sep = '',
+                                     collapse = ',')})) %>%
+    filter(synonyms != '') %>%
+    separate_rows(synonyms, sep = ',') %>%
+    filter(!str_detect(synonyms, '\\s')) %>%
+    mutate(synonyms = synonyms %>% 
+             str_remove_all('\\(a\\)|\\(p\\)') %>%
+             str_to_lower()) %>%
+  filter(lemma != synonyms) %>%
+  distinct()
+}
+
+get_words_hypernyms = function(words, POS) {
+  hypernyms_list = mapply(function(w, p) {
+    if (p %in% c('NUM', 'PROPN', 'PRON')) {
+      return()
+    } else {
+      pos_f = p
+      
+      if (p == 'ADJ') {
+        pos_f = 'ADJECTIVE'
+      } else if (p == 'ADV') {
+        pos_f = 'ADVERB'
+      }
+      
+      tryCatch({
+        filter = getTermFilter('ExactMatchFilter', w, T)
+        terms = getIndexTerms(pos_f, 1, filter)
+        synsets = getSynsets(terms[[1]])
+        
+        sapply(synsets, function(s) {
+          relatedSynsets = getRelatedSynsets(s, '@')
+          
+          sapply(relatedSynsets, getWord)
+        })
+      }, error = function(e) {
+        message(e)
+        message('\n')
+      })
+    }
+  }, words, POS)
+  
+  hypernyms_tibble = tibble(lemma = names(hypernyms_list),
+                            hypernyms = hypernyms_list %>%
+                              sapply(function(l) {
+                                sapply(l, function(h) {
+                                  paste(h, sep = '', collapse = ',')
+                                }) %>%
+                                  paste(sep = '', collapse = ',')})) %>%
+    filter(hypernyms != '') %>%
+    separate_rows(hypernyms, sep = ',') %>%
+    filter(!str_detect(hypernyms, '\\s') & hypernyms != '') %>%
+    mutate(hypernyms = hypernyms %>%
+             str_remove_all('c\\(|"')) %>%
+    filter(lemma != hypernyms) %>%
+    distinct()
+  
+    hypernyms_tibble
+}
+
+save_net = function(edges_list, filename) {
+  vertices_tbl = edges_list %>% 
+    .$Source %>% 
+    unique() %>% 
+    tibble(vertices = .) %>% 
+    mutate(id = row_number())
+  vertices_firstline = paste('*Vertices', vertices_tbl %>% nrow())
+  vertices = paste0(1:(vertices_tbl %>% nrow()), 
+                    ' "', 
+                    vertices_tbl$vertices, 
+                    '"')
+  edges_firstline = '*Edges'
+  edges = paste(edges_list %>% 
+                           rename(vertices = Source) %>% 
+                           left_join(vertices_tbl, by='vertices') %>%
+                           .$id,
+                         edges_list %>% 
+                           rename(vertices = Target) %>% 
+                           left_join(vertices_tbl, by='vertices') %>%
+                           .$id)
+  
+  if (file.exists(filename)) {
+    file.remove(filename)
+  }
+  
+  write(vertices_firstline, filename)
+  
+  for (i in 1:length(vertices)) {
+    write(vertices[i], filename, append=T)
+  }
+  
+  write(edges_firstline, filename, append = T)
+  
+  for (i in 1:length(edges)) {
+    write(edges[i], filename, append = T)
+  }
+}
+
+plot_net = function(net) {
+  net %>%
+    ggraph(layout = 'kk') +
+    geom_edge_link() +
+    geom_node_point() +
+    geom_text() +
+    theme_void()
+}
+```
+
+\[Text used\]
+
+```{r}
+# Load the text
 text = read_file('NCI_text1.txt')
+```
+
+\[Tokenization, lemmatization and POS tagging\]
+
+```{r}
+# Annotate text with udpipe
+# Select lemmas, remove punctuation, remove contractions ('s and 'd), transform to lowercase and remove repeated lemmas
+text_annotated = text %>% 
+  udpipe_annotate(m_eng, .) %>%
+  as_tibble() %>%
+  select(sentence_id, lemma, upos) %>%
+  filter(upos != 'PUNCT' & !str_detect(lemma, '\\W')) %>%
+  mutate(lemma = lemma %>% str_to_lower()) %>%
+  group_by(sentence_id) %>%
+  distinct() %>%
+  ungroup()
+```
+
+\[Grammatical words \]
+
+```{r}
+text_lexical = text_annotated %>%
+  filter(!upos %in% c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ'))
+```
+
+\[Synonyms and Hypernyms\]
+
+```{r}
+# Get synonyms tibble
+synonyms_tibble = get_words_synonyms(text_lexical$lemma,
+                                  text_lexical$upos)
+
+# Get hypernyms tibble
+hypernyms_tibble = get_words_hypernyms(text_lexical$lemma,
+                                       text_lexical$upos)
+```
+
+\[Search for synonymic relations\]
+
+```{r}
+# Direct synonyms
+direct_synonyms = synonyms_tibble %>%
+  filter(synonyms %in% text_lexical$lemma)
+
+# Direct hypernyms
+direct_hypernyms = hypernyms_tibble %>%
+  filter(hypernyms %in% text_lexical$lemma)
+```
+
+\[Build the network semantic representation\]
+
+\[First cycle\]
+
+```{r}
+# TODO Define function to create network of cliques
+# TODO Define function to spread activation
+# Get relevant synonyms and hypernyms
+lemmas_in_cycle = text_lexical %>%
+  filter(sentence_id %in% c(1)) %>%
+  .$lemma %>% unique()
+
+# TODO Check if this is right
+direct_synonyms %>%
+  filter(lemma %in% lemmas_in_cycle & synonyms %in% lemmas_in_cycle) %>%
+  bind_rows(direct_hypernyms %>%
+              filter(lemma %in% lemmas_in_cycle & hypernyms %in% lemmas_in_cycle))
+
+# Create clique network
+text_lexical %>%
+  filter(sentence_id %in% c(1)) %>%
+  rename(Source = lemma) %>%
+  mutate(Target = Source) %>%
+  group_by(sentence_id) %>%
+  expand(Source, Target) %>%
+  filter(Source != Target) %>%
+  select(-c(sentence_id)) %>%
+  save_net(., 'cycle1.net')
+
+cycle1 = read_graph('cycle1.net', format = 'pajek') %>% simplify()
+
+V(cycle1)$activation = 1/length(V(cycle1))
+
+cycle1 %>%
+    ggraph(layout = 'kk') +
+    geom_edge_link(color = "#dddddd") +
+    geom_node_point(aes(size = activation, alpha = activation), color = "#555555") +
+    geom_node_text(aes(label = name)) +
+    theme_void()
+```
+
+\[Second cycle\]
+
+```{r}
+# Get relevant synonyms and hypernyms
+lemmas_in_cycle = text_lexical %>%
+  filter(sentence_id %in% c(1, 2)) %>%
+  .$lemma %>% unique()
+
+# TODO Check if this is right
+direct_synonyms %>%
+  filter(lemma %in% lemmas_in_cycle & synonyms %in% lemmas_in_cycle) %>%
+  bind_rows(direct_hypernyms %>%
+              filter(lemma %in% lemmas_in_cycle & hypernyms %in% lemmas_in_cycle))
+
+# Create clique network
+text_lexical %>%
+  filter(sentence_id %in% c(1, 2)) %>%
+  rename(Source = lemma) %>%
+  mutate(Target = Source) %>%
+  group_by(sentence_id) %>%
+  expand(Source, Target) %>%
+  filter(Source != Target) %>%
+  select(-c(sentence_id)) %>%
+  bind_rows(direct_synonyms %>%
+              filter(lemma %in% c())) %>%
+  save_net(., 'cycle2.net')
+
+cycle2 = read_graph('cycle2.net', format = 'pajek') %>% simplify()
+
+# TODO Add CI algorithm using as_adjacency_matrix
+V(cycle2)$activation = 1/length(V(cycle2))
+
+cycle2 %>%
+    ggraph(layout = 'kk') +
+    geom_edge_link(color = "#dddddd") +
+    geom_node_point(aes(size = activation, alpha = activation), color = "#555555") +
+    geom_node_text(aes(label = name)) +
+    theme_void()
 ```
 
 # References
