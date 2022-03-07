@@ -154,13 +154,64 @@ save_net = function(edges_list, filename) {
   }
 }
 
+create_net = function(text_lexical, cycle) {
+  # Get relevant synonyms and hypernyms
+  lemmas_in_cycle = text_lexical %>%
+    filter(sentence_id %in% 1:cycle) %>%
+    .$lemma %>% unique()
+  
+  semantic_relations = direct_synonyms %>%
+    filter(lemma %in% lemmas_in_cycle & synonyms %in% lemmas_in_cycle) %>%
+      bind_rows(direct_hypernyms %>%
+                  filter(lemma %in% lemmas_in_cycle & 
+                           hypernyms %in% lemmas_in_cycle)) %>%
+      pivot_longer(-lemma, names_to = 'type', values_to = 'Target') %>%
+      filter(!is.na(Target)) %>%
+      rename(Source = lemma) %>%
+      select(-type)
+  
+  text_lexical %>%
+    filter(sentence_id %in% 1:cycle) %>%
+    rename(Source = lemma) %>%
+    mutate(Target = Source) %>%
+    group_by(sentence_id) %>%
+    expand(Source, Target) %>%
+    filter(Source != Target) %>%
+    ungroup() %>%
+    select(-sentence_id) %>%
+    bind_rows(semantic_relations) %>%
+    save_net(., paste0('cycle', cycle, '.net'))
+  
+  read_graph(paste0('cycle', cycle, '.net'), format = 'pajek') %>% 
+    simplify()
+}
+
+spread_activation = function(current, previous) {
+  if (is.na(previous) %>% all()) {
+    A = rep(1, length(V(current)))
+    W = as_adjacency_matrix(current)
+    
+    final_activation = (A %*% W)/max(A %*% W)
+    
+    final_activation[1,]
+  } else {
+    A = c(V(previous)$activation, rep(1, length(V(current)) - length(V(previous))))
+    W = as_adjacency_matrix(current)
+    
+    final_activation = (A %*% W)/max(A %*% W)
+    
+    final_activation[1,]
+  }
+}
+
 plot_net = function(net) {
   net %>%
     ggraph(layout = 'kk') +
-    geom_edge_link() +
-    geom_node_point() +
-    geom_text() +
-    theme_void()
+    geom_edge_link(color = "#eeeeee", edge_width = .5) +
+    geom_node_point(aes(size = activation, alpha = activation), color = "#555555") +
+    geom_node_text(aes(label = name)) +
+    theme_void() + 
+    scale_size(range = c(2, 10))
 }
 ```
 
@@ -223,80 +274,115 @@ direct_hypernyms = hypernyms_tibble %>%
 \[First cycle\]
 
 ```{r}
-# TODO Define function to create network of cliques
-# TODO Define function to spread activation
-# Get relevant synonyms and hypernyms
-lemmas_in_cycle = text_lexical %>%
-  filter(sentence_id %in% c(1)) %>%
-  .$lemma %>% unique()
-
-# TODO Check if this is right
-direct_synonyms %>%
-  filter(lemma %in% lemmas_in_cycle & synonyms %in% lemmas_in_cycle) %>%
-  bind_rows(direct_hypernyms %>%
-              filter(lemma %in% lemmas_in_cycle & hypernyms %in% lemmas_in_cycle))
-
 # Create clique network
-text_lexical %>%
-  filter(sentence_id %in% c(1)) %>%
-  rename(Source = lemma) %>%
-  mutate(Target = Source) %>%
-  group_by(sentence_id) %>%
-  expand(Source, Target) %>%
-  filter(Source != Target) %>%
-  select(-c(sentence_id)) %>%
-  save_net(., 'cycle1.net')
+cycle1 = create_net(text_lexical, 1)
 
-cycle1 = read_graph('cycle1.net', format = 'pajek') %>% simplify()
+# Spread activation
+V(cycle1)$activation = spread_activation(cycle1, NA)
 
-V(cycle1)$activation = 1/length(V(cycle1))
-
-cycle1 %>%
-    ggraph(layout = 'kk') +
-    geom_edge_link(color = "#dddddd") +
-    geom_node_point(aes(size = activation, alpha = activation), color = "#555555") +
-    geom_node_text(aes(label = name)) +
-    theme_void()
+cycle1 %>% 
+  plot_net()
 ```
 
 \[Second cycle\]
 
 ```{r}
-# Get relevant synonyms and hypernyms
-lemmas_in_cycle = text_lexical %>%
-  filter(sentence_id %in% c(1, 2)) %>%
-  .$lemma %>% unique()
-
-# TODO Check if this is right
-direct_synonyms %>%
-  filter(lemma %in% lemmas_in_cycle & synonyms %in% lemmas_in_cycle) %>%
-  bind_rows(direct_hypernyms %>%
-              filter(lemma %in% lemmas_in_cycle & hypernyms %in% lemmas_in_cycle))
-
 # Create clique network
-text_lexical %>%
-  filter(sentence_id %in% c(1, 2)) %>%
-  rename(Source = lemma) %>%
-  mutate(Target = Source) %>%
+cycle2 = create_net(text_lexical, 2)
+
+# Spread activation
+V(cycle2)$activation = spread_activation(cycle2, cycle1)
+
+cycle2 %>% 
+  plot_net()
+```
+
+\[Third cycle\]
+
+```{r}
+# Create clique network
+cycle3 = create_net(text_lexical, 3)
+
+# Spread activation
+V(cycle3)$activation = spread_activation(cycle3, cycle2)
+
+cycle3 %>% 
+  plot_net()
+```
+
+\[Fourth Cycle\]
+
+```{r}
+# Create clique network
+cycle4 = create_net(text_lexical, 4)
+
+# Spread activation
+V(cycle4)$activation = spread_activation(cycle4, cycle3)
+
+cycle4 %>% 
+  plot_net()
+```
+
+\[Cycles 5 to 34\]
+
+```{r}
+remaining_cycles = lapply(5:34, function(c) {
+  create_net(text_lexical, c)
+})
+
+for (c in 1:length(remaining_cycles)) {
+  if (c == 1) {
+    V(remaining_cycles[[c]])$activation = spread_activation(
+      remaining_cycles[[c]], cycle4)
+  } else {
+    V(remaining_cycles[[c]])$activation = spread_activation(
+      remaining_cycles[[c]], remaining_cycles[[c - 1]])
+  }
+}
+
+remaining_cycles[[30]] %>% 
+  plot_net()
+```
+
+\[Correlation with most used words on recall\]
+
+```{r}
+library(pdftools)
+
+recall = read_file('NCI_recall.txt') %>%
+  udpipe_annotate(m_eng, .) %>%
+  as_tibble() %>%
+  select(sentence_id, lemma, upos) %>%
+  filter(upos != 'PUNCT' & !str_detect(lemma, '\\W')) %>%
+  mutate(lemma = lemma %>% str_to_lower()) %>%
   group_by(sentence_id) %>%
-  expand(Source, Target) %>%
-  filter(Source != Target) %>%
-  select(-c(sentence_id)) %>%
-  bind_rows(direct_synonyms %>%
-              filter(lemma %in% c())) %>%
-  save_net(., 'cycle2.net')
+  distinct() %>%
+  ungroup()
 
-cycle2 = read_graph('cycle2.net', format = 'pajek') %>% simplify()
+activation_recall = tibble(lemma = V(remaining_cycles[[30]])$name, 
+       activation = V(remaining_cycles[[30]])$activation) %>%
+  left_join(recall %>%
+              filter(!upos %in% 
+                       c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ')) %>%
+              group_by(lemma) %>%
+              count(),
+            by = 'lemma')
 
-# TODO Add CI algorithm using as_adjacency_matrix
-V(cycle2)$activation = 1/length(V(cycle2))
+activation_recall %>%
+  filter(!is.na(n)) %>%
+  ggplot(aes(activation, n)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  geom_smooth(method = 'lm')
+```
 
-cycle2 %>%
-    ggraph(layout = 'kk') +
-    geom_edge_link(color = "#dddddd") +
-    geom_node_point(aes(size = activation, alpha = activation), color = "#555555") +
-    geom_node_text(aes(label = name)) +
-    theme_void()
+\[Linear model\]
+
+```{r}
+activation_recall %>%
+  lm(n ~ activation, data = .) %>%
+  summary()
 ```
 
 # References
