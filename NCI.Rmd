@@ -1,14 +1,14 @@
 ---
 title: "Network Construction-Integration"
 output:
-  html_notebook:
-    toc: yes
-    toc_depth: 5
-    number_sections: yes
   pdf_document:
     toc: yes
     toc_depth: '5'
     latex_engine: xelatex
+  html_notebook:
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
 bibliography: references.bib
 csl: instituto-brasileiro-de-informacao-em-ciencia-e-tecnologia-abnt-initials.csl
 ---
@@ -37,7 +37,7 @@ setDict('wn3.1.dict/dict/')
 # Define helper functions
 get_words_synonyms = function(words, POS) {
   synonyms_list = mapply(function(w, p) {
-    if (p %in% c('NUM', 'PROPN', 'PRON')) {
+    if (p %in% c('NUM', 'PROPN', 'PRON', 'SYM')) {
       return()
     } else {
       pos_f = p
@@ -70,7 +70,7 @@ get_words_synonyms = function(words, POS) {
 
 get_words_hypernyms = function(words, POS) {
   hypernyms_list = mapply(function(w, p) {
-    if (p %in% c('NUM', 'PROPN', 'PRON')) {
+    if (p %in% c('NUM', 'PROPN', 'PRON', 'SYM')) {
       return()
     } else {
       pos_f = p
@@ -191,7 +191,15 @@ spread_activation = function(current, previous) {
     A = rep(1, length(V(current)))
     W = as_adjacency_matrix(current)
     
-    final_activation = (A %*% W)/max(A %*% W)
+    repeat {
+      A = (A %*% W)/max(A %*% W)
+      
+      if (any(abs(A - (A %*% W)/max(A %*% W)) < .001)) {
+        break
+      }
+    }
+    
+    final_activation = A
     
     final_activation[1,]
   } else {
@@ -341,14 +349,48 @@ for (c in 1:length(remaining_cycles)) {
 }
 
 remaining_cycles[[30]] %>% 
+  plot_net() %>%
+  ggsave('last_cycle.png', plot = ., device = 'png', width = 297, height = 210, units = 'mm')
+```
+
+\[Comparação com difusão de ativação somente na rede final\]
+
+```{r}
+final_network = create_net(text_lexical, 34)
+
+V(final_network)$activation = spread_activation(final_network, NA)
+
+final_network %>%
   plot_net()
 ```
 
-\[Correlation with most used words on recall\]
+\[Métricas das redes\]
 
 ```{r}
-library(pdftools)
+# Transitivity of final network
+remaining_cycles[[30]] %>% transitivity() # Spreading activation per cycle
+final_network %>% transitivity() # Spreading activation only in final network
 
+# Transitivity of random counterpart
+length(E(remaining_cycles[[30]])) / (length(V(remaining_cycles[[30]])) * (length(V(remaining_cycles[[30]])) - 1))
+
+# Degree distribution
+remaining_cycles[[30]] %>% # Spreading activation per cycle
+  degree() %>%
+  tibble(k = .) %>%
+  group_by(k) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(p_k = n/sum(n)) %>%
+  ggplot(aes(k, p_k)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10()
+```
+
+\[Correlation with most used words on recall - lm with frequency of recalled words\]
+
+```{r}
 recall = read_file('NCI_recall.txt') %>%
   udpipe_annotate(m_eng, .) %>%
   as_tibble() %>%
@@ -359,8 +401,27 @@ recall = read_file('NCI_recall.txt') %>%
   distinct() %>%
   ungroup()
 
+# Activation considering spreading per cycle
 activation_recall = tibble(lemma = V(remaining_cycles[[30]])$name, 
        activation = V(remaining_cycles[[30]])$activation) %>%
+  left_join(recall %>%
+              filter(!upos %in% 
+                       c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ')) %>%
+              group_by(lemma) %>%
+              count(),
+            by = 'lemma')
+
+activation_recall %>%
+  filter(!is.na(n)) %>%
+  ggplot(aes(activation, n)) +
+  geom_point() +
+  scale_x_log10() +
+  scale_y_log10() +
+  geom_smooth(method = 'lm')
+
+# Activation considering spreading in the final network
+activation_recall = tibble(lemma = V(final_network)$name, 
+       activation = V(final_network)$activation) %>%
   left_join(recall %>%
               filter(!upos %in% 
                        c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ')) %>%
@@ -380,9 +441,60 @@ activation_recall %>%
 \[Linear model\]
 
 ```{r}
+# Simple linear model
 activation_recall %>%
   lm(n ~ activation, data = .) %>%
   summary()
+```
+
+\[glm with probability of text word being recalled\]
+
+```{r}
+recall_participant = read_csv('recall_participants.csv')
+
+# Activation considering spreading per cycle
+activation_recall = recall_participant %>%
+  left_join(tibble(lemma = V(remaining_cycles[[30]])$name, 
+       activation = V(remaining_cycles[[30]])$activation),
+       by = 'lemma') %>%
+  filter(!is.na(activation))
+
+activation_recall %>%
+  group_by(lemma) %>%
+  summarize(p = mean(recall), activation = unique(activation)) %>%
+  ggplot(aes(activation, p)) +
+  geom_point() + 
+  scale_y_log10() +
+  scale_x_log10()
+
+# Activation considering spreading in the final network
+activation_recall = recall_participant %>%
+  left_join(tibble(lemma = V(final_network)$name, 
+       activation = V(final_network)$activation),
+       by = 'lemma') %>%
+  filter(!is.na(activation))
+
+activation_recall %>%
+  group_by(lemma) %>%
+  summarize(p = mean(recall), activation = unique(activation)) %>%
+  ggplot(aes(activation, p)) +
+  geom_point() +
+  scale_y_log10() + 
+  scale_x_log10()
+```
+
+```{r}
+library(lme4)
+library(lmerTest)
+library(sjPlot)
+
+# Logistic multilevel model
+model_logistic = activation_recall %>%
+  mutate(recall = ifelse(recall, 1, 0) %>% factor()) %>%
+  glmer(recall ~ activation + (1|participant), data = ., family = binomial())
+
+tab_model(model_logistic, transform = NULL)
+plot_model(model_logistic, type = 'pred', terms = 'activation[all]', show.data = T)
 ```
 
 # References
