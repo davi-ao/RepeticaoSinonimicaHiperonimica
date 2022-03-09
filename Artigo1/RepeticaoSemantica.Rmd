@@ -1,0 +1,49 @@
+---
+title: "Redes Semânticas de Cliques ampliadas por Relações de Repetição Sinonímica, Hiperonímica e Anafórica"
+output:
+  pdf_document:
+    toc: yes
+    toc_depth: '5'
+    latex_engine: xelatex
+  html_notebook:
+    toc: yes
+    toc_depth: 5
+    number_sections: yes
+bibliography: references.bib
+csl: instituto-brasileiro-de-informacao-em-ciencia-e-tecnologia-abnt-initials.csl
+---
+
+```{r include=FALSE}
+# Carregar pacotes necessários
+# Obs.: Pode ser necessário instalar o paconte antes de carregá-lo
+library(tidyverse)
+library(udpipe)
+library(wordnet)
+library(igraph)
+
+# Carregar modelo english-ewt para o pacote udpipe
+m_eng = udpipe_load_model('../english-ewt-ud-2.5-191206.udpipe')
+
+# Configurar dicionário do Wordnet
+setDict('../wn3.1.dict/dict/')
+
+# TODO Copiar textos dos PDFs para documentos de texto simples (.txt)
+```
+
+# Introdução
+
+# Método
+
+## Corpus
+
+## Redes
+
+### Rede de Títulos
+
+### Rede de Resumos
+
+### Redes de Artigos
+
+### Redes de Palavras Aleatórias
+
+# Referências
