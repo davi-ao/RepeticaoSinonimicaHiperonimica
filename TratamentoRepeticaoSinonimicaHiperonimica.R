@@ -252,8 +252,12 @@ corpus = c('corpus/2020_q6.txt',
            'corpus/2020_q42.txt',
            'corpus/2020_q43.txt')
 
+corpus_news = c('noticia1.txt',
+                'noticia2.txt',
+                'noticia3.txt')
+
 # Carregar textos
-textos = sapply(corpus, read_file) %>% as_tibble()
+textos = sapply(corpus_news, read_file) %>% as_tibble()
 
 # Definir tabela inicial de textos tratados
 textos_tratados = tibble(texto = integer(), tokens = character(), p = integer())
@@ -297,7 +301,7 @@ for (t in 1:(redes_0$texto %>% unique() %>% length())) {
 for (t in 1:(redes_finais$texto %>% unique() %>% length())) {
   salvar_net(redes_finais %>% 
                filter(texto == t), 
-             paste0('redes/rede_finais_', t, '.net'))
+             paste0('redes_news/news_', t, '.net'))
 }
 
 # Redes de cliques com sinonímia e hiperonímia iniciais

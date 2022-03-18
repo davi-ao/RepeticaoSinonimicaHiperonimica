@@ -26,76 +26,171 @@ library(wordnet)
 library(igraph)
 library(ggraph)
 
-# Donwload and load the english-ewt model for udpipe package
-model_ewt = udpipe_download_model(language = 'english-ewt')
+# Donwload and load the english-ewt and portuguese-br models for udpipe package
+# model_ewt = udpipe_download_model(language = 'english-ewt')
+# model_por = udpipe_download_model(language = 'portuguese-br')
 
-m_eng = udpipe_load_model(model_ewt$file_model)
+m_eng = udpipe_load_model('udpipe-models/english-ewt-ud-2.5-191206.udpipe')
+m_por = udpipe_load_model('udpipe-models/portuguese-br-ud-2.0-170801.udpipe')
 
-# Configure wordnet dictionary
+# Configure wordnet dictionary for English
 setDict('wn3.1.dict/dict/')
 
-# Define helper functions
-get_words_synonyms = function(words, POS) {
-  synonyms_list = mapply(function(w, p) {
-    if (p %in% c('NUM', 'PROPN', 'PRON', 'SYM')) {
-      return()
-    } else {
-      pos_f = p
-      
-      if (p == 'ADJ') {
-        pos_f = 'ADJECTIVE'
-      } else if (p == 'ADV') {
-        pos_f = 'ADVERB'
-      }
-      
-      synonyms(w, pos_f)
-    }
-  }, words, POS)
-  
-  synonyms_tibble = tibble(lemma = names(synonyms_list),
-                           synonyms = synonyms_list %>%
-                             sapply(function(s) {
-                               paste(s,
-                                     sep = '',
-                                     collapse = ',')})) %>%
-    filter(synonyms != '') %>%
-    separate_rows(synonyms, sep = ',') %>%
-    filter(!str_detect(synonyms, '\\s')) %>%
-    mutate(synonyms = synonyms %>% 
-             str_remove_all('\\(a\\)|\\(p\\)') %>%
-             str_to_lower()) %>%
-  filter(lemma != synonyms) %>%
-  distinct()
-}
+```
 
-get_words_hypernyms = function(words, POS) {
-  hypernyms_list = mapply(function(w, p) {
-    if (p %in% c('NUM', 'PROPN', 'PRON', 'SYM')) {
-      return()
-    } else {
-      pos_f = p
-      
-      if (p == 'ADJ') {
-        pos_f = 'ADJECTIVE'
-      } else if (p == 'ADV') {
-        pos_f = 'ADVERB'
-      }
-      
-      tryCatch({
-        filter = getTermFilter('ExactMatchFilter', w, T)
-        terms = getIndexTerms(pos_f, 1, filter)
-        synsets = getSynsets(terms[[1]])
+## PT-BR resources
+
+```{r}
+# Load pt-br lemmas
+lemmas_por = read_file('lemmatization-pt.txt') %>%
+  str_split('\\n') %>%
+  unlist() %>%
+  tibble(lemmas = .) %>%
+  separate(lemmas, into = c('lemma', 'flexao'), sep = '\\t') %>%
+  filter(!is.na(flexao)) %>%
+  mutate(lemma = lemma %>% str_remove_all('\\r'),
+         flexao = flexao %>% str_remove_all('\\r')) %>% 
+  rename(token = flexao)
+
+# Load pt-br synonyms
+synonyms_por = read_file('PAPEL/relacoes_final_SINONIMIA.txt') %>%
+  str_split('\n') %>%
+  unlist() %>%
+  tibble(sinonimo = .) %>%
+  separate(sinonimo, c('token', 'upos', 'synonym'), sep = ' ') %>%
+  filter(!is.na(synonym)) %>%
+  mutate(upos = upos %>% str_match('_(.+)_') %>% .[,2]) %>%
+  mutate(upos = upos %>% recode(N = 'NOUN', V = 'VERB'))
+
+# Load pt-br hypernyms
+hypernyms_por = read_file('PAPEL/relacoes_final_HIPERONIMIA.txt') %>%
+  str_split('\n') %>%
+  unlist() %>%
+  tibble(hiperonimo = .) %>%
+  separate(hiperonimo, c('token', 'relation', 'hypernym'), sep = ' ') %>%
+  filter(!is.na(hypernym)) %>%
+  select(token, hypernym)
+```
+
+# Functions
+
+## Annotate text
+
+```{r}
+# Annotate texts with udpipe
+annotate_text = function(text, language = 'EN') {
+  model = m_eng
+  
+  if (language == 'PT') {
+    model = m_por
+  }
+  
+  annotated_text = text %>% 
+    udpipe_annotate(model, .) %>%
+    as_tibble()
+  
+  if (language == 'PT') {
+    annotated_text = annotated_text %>%
+      select(-lemma) %>%
+      mutate(token = token %>% 
+               str_to_lower()) %>%
+      left_join(lemmas_por, by = 'token')
+  }
+  
+  annotated_text %>% 
+    select(sentence_id, lemma, upos) %>%
+    filter(upos != 'PUNCT' & !str_detect(lemma, '\\W')) %>%
+    mutate(lemma = lemma %>% str_to_lower()) %>%
+    group_by(sentence_id) %>%
+    distinct() %>%
+    ungroup()
+}
+```
+
+## Get synonyms
+
+```{r}
+# Get synonyms
+get_words_synonyms = function(words, POS, language = 'EN') {
+  if (language == 'EN') {
+    synonyms_list = mapply(function(w, p) {
+      if (p %in% c('NUM', 'PROPN', 'PRON', 'SYM')) {
+        return()
+      } else {
+        pos_f = p
         
-        sapply(synsets, function(s) {
-          relatedSynsets = getRelatedSynsets(s, '@')
+        if (p == 'ADJ') {
+          pos_f = 'ADJECTIVE'
+        } else if (p == 'ADV') {
+          pos_f = 'ADVERB'
+        }
+        
+        synonyms(w, pos_f)
+      }
+    }, words, POS)
+    
+    synonyms_tibble = tibble(lemma = names(synonyms_list),
+                             synonyms = synonyms_list %>%
+                               sapply(function(s) {
+                                 paste(s,
+                                       sep = '',
+                                       collapse = ',')})) %>%
+      filter(synonyms != '') %>%
+      separate_rows(synonyms, sep = ',') %>%
+      filter(!str_detect(synonyms, '\\s')) %>%
+      mutate(synonyms = synonyms %>% 
+               str_remove_all('\\(a\\)|\\(p\\)') %>%
+               str_to_lower()) %>%
+    filter(lemma != synonyms) %>%
+    distinct()
+    
+    synonyms_tibble
+  } else if (language == 'PT') {
+    synonyms_tibble = tibble(token = words, upos = POS) %>%
+      left_join(synonyms_por, by = c("token" = "token", "upos" = "upos")) %>%
+      select(token, synonym) %>%
+      filter(!is.na(synonym)) %>%
+      rename(lemma = token, synonyms = synonym) %>%
+      distinct()
+    
+    synonyms_tibble
+  }
+}
+```
+
+## Get hypernyms
+
+```{r}
+# Get hypernyms
+get_words_hypernyms = function(words, POS, language = 'EN') {
+  if (language == 'EN') {
+    hypernyms_list = mapply(function(w, p) {
+      if (p %in% c('NUM', 'PROPN', 'PRON', 'SYM')) {
+        return()
+      } else {
+        pos_f = p
+        
+        if (p == 'ADJ') {
+          pos_f = 'ADJECTIVE'
+        } else if (p == 'ADV') {
+          pos_f = 'ADVERB'
+        }
+        
+        tryCatch({
+          filter = getTermFilter('ExactMatchFilter', w, T)
+          terms = getIndexTerms(pos_f, 1, filter)
+          synsets = getSynsets(terms[[1]])
           
-          sapply(relatedSynsets, getWord)
+          sapply(synsets, function(s) {
+            relatedSynsets = getRelatedSynsets(s, '@')
+            
+            sapply(relatedSynsets, getWord)
+          })
+        }, error = function(e) {
+          message(e)
+          message('\n')
         })
-      }, error = function(e) {
-        message(e)
-        message('\n')
-      })
-    }
+      }
   }, words, POS)
   
   hypernyms_tibble = tibble(lemma = names(hypernyms_list),
@@ -114,8 +209,23 @@ get_words_hypernyms = function(words, POS) {
     distinct()
   
     hypernyms_tibble
+  } else if (language == 'PT') {
+    hypernyms_tibble = tibble(token = words) %>%
+      left_join(hypernyms_por, by = 'token') %>%
+      select(token, hypernym) %>%
+      filter(!is.na(hypernym)) %>%
+      rename(lemma = token, hypernyms = hypernym) %>%
+      distinct()
+    
+    hypernyms_tibble
+  }
 }
+```
 
+## Save network in Pajek format
+
+```{r}
+# Save network as Pajek .net file
 save_net = function(edges_list, filename) {
   vertices_tbl = edges_list %>% 
     .$Source %>% 
@@ -153,16 +263,21 @@ save_net = function(edges_list, filename) {
     write(edges[i], filename, append = T)
   }
 }
+```
 
-create_net = function(text_lexical, cycle) {
+## Create network of cliques
+
+```{r}
+# Create network of cliques with additional edges
+create_net = function(text_lexical, cycle, file, synonyms, hypernyms) {
   # Get relevant synonyms and hypernyms
   lemmas_in_cycle = text_lexical %>%
     filter(sentence_id %in% 1:cycle) %>%
     .$lemma %>% unique()
   
-  semantic_relations = direct_synonyms %>%
+  semantic_relations = synonyms %>%
     filter(lemma %in% lemmas_in_cycle & synonyms %in% lemmas_in_cycle) %>%
-      bind_rows(direct_hypernyms %>%
+      bind_rows(hypernyms %>%
                   filter(lemma %in% lemmas_in_cycle & 
                            hypernyms %in% lemmas_in_cycle)) %>%
       pivot_longer(-lemma, names_to = 'type', values_to = 'Target') %>%
@@ -180,12 +295,15 @@ create_net = function(text_lexical, cycle) {
     ungroup() %>%
     select(-sentence_id) %>%
     bind_rows(semantic_relations) %>%
-    save_net(., paste0('cycle', cycle, '.net'))
+    save_net(., file)
   
-  read_graph(paste0('cycle', cycle, '.net'), format = 'pajek') %>% 
+  read_graph(file, format = 'pajek') %>% 
     simplify()
 }
+```
 
+```{r}
+# Spreak activation
 spread_activation = function(current, previous) {
   if (is.na(previous) %>% all()) {
     A = rep(1, length(V(current)))
@@ -211,7 +329,10 @@ spread_activation = function(current, previous) {
     final_activation[1,]
   }
 }
+```
 
+```{r}
+# Plot network
 plot_net = function(net) {
   net %>%
     ggraph(layout = 'kk') +
@@ -223,72 +344,155 @@ plot_net = function(net) {
 }
 ```
 
-\[Text used\]
+# Procedure
+
+## Load texts
 
 ```{r}
-# Load the text
+# Load the Englishh text
 text = read_file('NCI_text1.txt')
+
+# Load the Portuguese texts
+news1 = read_file('noticia1.txt')
+news2 = read_file('noticia2.txt')
+news3 = read_file('noticia3.txt')
 ```
 
-\[Tokenization, lemmatization and POS tagging\]
+## Tokenization, lemmatization and POS tagging
 
 ```{r}
 # Annotate text with udpipe
 # Select lemmas, remove punctuation, remove contractions ('s and 'd), transform to lowercase and remove repeated lemmas
-text_annotated = text %>% 
-  udpipe_annotate(m_eng, .) %>%
-  as_tibble() %>%
-  select(sentence_id, lemma, upos) %>%
-  filter(upos != 'PUNCT' & !str_detect(lemma, '\\W')) %>%
-  mutate(lemma = lemma %>% str_to_lower()) %>%
-  group_by(sentence_id) %>%
-  distinct() %>%
-  ungroup()
+text_annotated = annotate_text(text)
+
+news1_annotated = annotate_text(news1, 'PT')
+news2_annotated = annotate_text(news2, 'PT')
+news3_annotated = annotate_text(news3, 'PT')
 ```
 
-\[Grammatical words \]
+## Remove grammatical words
 
 ```{r}
 text_lexical = text_annotated %>%
   filter(!upos %in% c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ'))
+
+news1_lexical = news1_annotated %>%
+  filter(!upos %in% c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ'))
+
+news2_lexical = news2_annotated %>%
+  filter(!upos %in% c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ'))
+
+news3_lexical = news3_annotated %>%
+  filter(!upos %in% c('ADP', 'AUX', 'CCONJ', 'DET', 'PART', 'SCONJ'))
 ```
 
-\[Synonyms and Hypernyms\]
+## Get synonyms and hypernyms
 
 ```{r}
-# Get synonyms tibble
+# Get synonyms tibbles
 synonyms_tibble = get_words_synonyms(text_lexical$lemma,
                                   text_lexical$upos)
 
-# Get hypernyms tibble
+news1_synonyms_tibble = get_words_synonyms(news1_lexical$lemma,
+                                           news1_lexical$upos,
+                                           'PT')
+
+news2_synonyms_tibble = get_words_synonyms(news2_lexical$lemma,
+                                           news2_lexical$upos,
+                                           'PT')
+
+news3_synonyms_tibble = get_words_synonyms(news3_lexical$lemma,
+                                           news3_lexical$upos,
+                                           'PT')
+
+# Get hypernyms tibbles
 hypernyms_tibble = get_words_hypernyms(text_lexical$lemma,
                                        text_lexical$upos)
+
+news1_hypernyms_tibble = get_words_hypernyms(news1_lexical$lemma,
+                                           news1_lexical$upos,
+                                           'PT')
+
+news2_hypernyms_tibble = get_words_hypernyms(news2_lexical$lemma,
+                                           news2_lexical$upos,
+                                           'PT')
+
+news3_hypernyms_tibble = get_words_hypernyms(news3_lexical$lemma,
+                                           news3_lexical$upos,
+                                           'PT')
+
+# TODO Get hyponyms tibbles
 ```
 
-\[Search for synonymic relations\]
+## Search synonymic and hyperonymic relations
 
 ```{r}
 # Direct synonyms
-direct_synonyms = synonyms_tibble %>%
+direct_synonyms_eng = synonyms_tibble %>%
   filter(synonyms %in% text_lexical$lemma)
 
+direct_synonyms1_por = news1_synonyms_tibble %>%
+  filter(synonyms %in% news1_lexical$lemma)
+
+direct_synonyms2_por = news2_synonyms_tibble %>%
+  filter(synonyms %in% news2_lexical$lemma)
+
+direct_synonyms3_por = news3_synonyms_tibble %>%
+  filter(synonyms %in% news3_lexical$lemma)
+
 # Direct hypernyms
-direct_hypernyms = hypernyms_tibble %>%
+direct_hypernyms_eng = hypernyms_tibble %>%
   filter(hypernyms %in% text_lexical$lemma)
+
+direct_hypernyms1_por = news1_hypernyms_tibble %>%
+  filter(hypernyms %in% news1_lexical$lemma)
+
+direct_hypernyms2_por = news2_hypernyms_tibble %>%
+  filter(hypernyms %in% news2_lexical$lemma)
+
+direct_hypernyms3_por = news3_hypernyms_tibble %>%
+  filter(hypernyms %in% news3_lexical$lemma)
 ```
 
-\[Build the network semantic representation\]
+## Build Networks
 
 \[First cycle\]
 
 ```{r}
 # Create clique network
-cycle1 = create_net(text_lexical, 1)
+cycle1 = create_net(text_lexical, 
+                    1, 
+                    'redes_cycles/cycle1.net', 
+                    direct_synonyms, 
+                    direct_hypernyms)
+news1_cycle1 = create_net(news1_lexical, 
+                         1, 
+                         'redes_news/news1_c1.net',
+                         direct_synonyms1_por,
+                         direct_hypernyms1_por)
+# ERROR
+news2_cycle = create_net(news2_lexical, 
+                         1, 
+                         'redes_news/news2_c1.net',
+                         direct_synonyms2_por,
+                         direct_hypernyms2_por)
+
+# ERROR
+news3_cycle = create_net(news3_lexical, 
+                         1, 
+                         'redes_news/news3_c1.net',
+                         direct_synonyms3_por,
+                         direct_hypernyms3_por)
 
 # Spread activation
 V(cycle1)$activation = spread_activation(cycle1, NA)
+V(news1_cycle1)$activation = spread_activation(news1_cycle1, NA)
+
 
 cycle1 %>% 
+  plot_net()
+
+news1_cycle1 %>%
   plot_net()
 ```
 
@@ -297,11 +501,20 @@ cycle1 %>%
 ```{r}
 # Create clique network
 cycle2 = create_net(text_lexical, 2)
+news1_cycle2 = create_net(news1_lexical, 
+                         2, 
+                         'redes_news/news1_c2.net',
+                         direct_synonyms1_por,
+                         direct_hypernyms1_por)
 
 # Spread activation
 V(cycle2)$activation = spread_activation(cycle2, cycle1)
+V(news1_cycle2)$activation = spread_activation(news1_cycle2, news1_cycle1)
 
 cycle2 %>% 
+  plot_net()
+
+news1_cycle2 %>%
   plot_net()
 ```
 
@@ -310,11 +523,20 @@ cycle2 %>%
 ```{r}
 # Create clique network
 cycle3 = create_net(text_lexical, 3)
+news1_cycle3 = create_net(news1_lexical, 
+                         3, 
+                         'redes_news/news1_c3.net',
+                         direct_synonyms1_por,
+                         direct_hypernyms1_por)
 
 # Spread activation
 V(cycle3)$activation = spread_activation(cycle3, cycle2)
+V(news1_cycle3)$activation = spread_activation(news1_cycle3, news1_cycle2)
 
 cycle3 %>% 
+  plot_net()
+
+news1_cycle3 %>%
   plot_net()
 ```
 
@@ -495,6 +717,17 @@ model_logistic = activation_recall %>%
 
 tab_model(model_logistic, transform = NULL)
 plot_model(model_logistic, type = 'pred', terms = 'activation[all]', show.data = T)
+```
+
+```{r}
+# Redes de notícias
+news_1_net = read_graph('redes_news/news_1.net', format = 'pajek') %>% 
+    simplify()
+
+V(news_1_net)$activation = spread_activation(news_1_net, NA)
+
+news_1_net %>%
+  plot_net()
 ```
 
 # References

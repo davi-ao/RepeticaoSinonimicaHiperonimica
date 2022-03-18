@@ -15,14 +15,16 @@ csl: instituto-brasileiro-de-informacao-em-ciencia-e-tecnologia-abnt-initials.cs
 
 ```{r include=FALSE}
 # Carregar pacotes necessários
-# Obs.: Pode ser necessário instalar o paconte antes de carregá-lo
+# Obs.: Pode ser necessário instalar o paconte antes
 library(tidyverse)
 library(udpipe)
 library(wordnet)
 library(igraph)
 
-# Carregar modelo english-ewt para o pacote udpipe
-m_eng = udpipe_load_model('../english-ewt-ud-2.5-191206.udpipe')
+# Carregar modelos english-ewt e portuguese-br para o pacote udpipe
+# Obs.: Pode ser necessário baixar o modelo antes
+m_eng = udpipe_load_model('../udpipe-models/english-ewt-ud-2.5-191206.udpipe')
+m_por = udpipe_load_model('../udpipe-models/portuguese-br-ud-2.0-170801.udpipe')
 
 # Configurar dicionário do Wordnet
 setDict('../wn3.1.dict/dict/')
@@ -35,6 +37,8 @@ setDict('../wn3.1.dict/dict/')
 # Método
 
 ## Corpus
+
+O corpus foi formado a partir da busca no ScienceDirect, usando a string "complex network" AND (text OR discourse OR language) no campo "Title, abstract or author-specified keywords", com o filtro "Research articles" marcado, resultando em 111 resultados (10/03/2022)
 
 ## Redes
 
