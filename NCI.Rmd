@@ -578,7 +578,11 @@ remaining_cycles[[30]] %>%
 \[Comparação com difusão de ativação somente na rede final\]
 
 ```{r}
-final_network = create_net(text_lexical, 34)
+final_network = create_net(text_lexical, 
+                           34,
+                           'redes/final.net',
+                           synonyms_tibble,
+                           hypernyms_tibble)
 
 V(final_network)$activation = spread_activation(final_network, NA)
 
@@ -608,6 +612,16 @@ remaining_cycles[[30]] %>% # Spreading activation per cycle
   geom_point() +
   scale_x_log10() +
   scale_y_log10()
+
+final_network %>% # Spreading activation per cycle
+  degree() %>%
+  tibble(k = .) %>%
+  group_by(k) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(p_k = n/sum(n)) %>%
+  ggplot(aes(k, p_k)) +
+  geom_point()
 ```
 
 \[Correlation with most used words on recall - lm with frequency of recalled words\]

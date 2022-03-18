@@ -21,12 +21,12 @@ library(udpipe)
 library(wordnet)
 library(igraph)
 
-# Carregar modelos english-ewt e portuguese-br para o pacote udpipe
+# Carregar modelo english-ewt para o pacote udpipe
 # Obs.: Pode ser necessário baixar o modelo antes
 m_eng = udpipe_load_model('../udpipe-models/english-ewt-ud-2.5-191206.udpipe')
-m_por = udpipe_load_model('../udpipe-models/portuguese-br-ud-2.0-170801.udpipe')
 
 # Configurar dicionário do Wordnet
+# Obs.: Pode ser necessário baixar o dicionário antes
 setDict('../wn3.1.dict/dict/')
 
 # TODO Copiar textos dos PDFs para documentos de texto simples (.txt)
