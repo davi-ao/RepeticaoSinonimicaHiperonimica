@@ -38,7 +38,7 @@ setDict('../wn3.1.dict/dict/')
 
 ## Corpus
 
-O corpus foi formado a partir da busca no ScienceDirect, usando a string "complex network" AND (text OR discourse OR language) no campo "Title, abstract or author-specified keywords", com o filtro "Research articles" marcado, resultando em 111 resultados (10/03/2022)
+O corpus foi formado a partir da busca no ScienceDirect, usando a string "complex network" AND (text OR discourse OR linguistic OR semantic) no campo "Title, abstract or author-specified keywords", com o filtro "Research articles" marcado, resultando em 112 resultados (18/03/2022).
 
 ## Redes
 
