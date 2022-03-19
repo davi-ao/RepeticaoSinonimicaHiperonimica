@@ -29,7 +29,12 @@ m_eng = udpipe_load_model('../udpipe-models/english-ewt-ud-2.5-191206.udpipe')
 # Obs.: Pode ser necessário baixar o dicionário antes
 setDict('../wn3.1.dict/dict/')
 
-# TODO Copiar textos dos PDFs para documentos de texto simples (.txt)
+corpus_info = read_file('corpus.txt') %>%
+  tibble(text = .) %>%
+  separate_rows(text, sep = '\n') %>%
+  filter(row_number() %in% (1:(nrow(corpus_info)/12) * 12 + 1))
+
+# TODO Baixar html dos artigos
 ```
 
 # Introdução
