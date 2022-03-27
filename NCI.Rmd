@@ -584,6 +584,8 @@ final_network = create_net(text_lexical,
                            synonyms_tibble,
                            hypernyms_tibble)
 
+final_network = read_graph('redes/final.net', format = 'pajek')
+
 V(final_network)$activation = spread_activation(final_network, NA)
 
 final_network %>%
@@ -623,6 +625,21 @@ final_network %>% # Spreading activation per cycle
   ggplot(aes(k, p_k)) +
   geom_point()
 ```
+
+```{r}
+final_network %>% # Spreading activation per cycle
+  degree() %>%
+  tibble(k = .) %>%
+  group_by(k) %>%
+  count() %>%
+  ungroup() %>%
+  mutate(p_k = n/sum(n)) %>%
+  ggplot(aes(k, p_k)) +
+  geom_point() + 
+  scale_y_log10() + 
+  scale_x_log10()
+```
+
 
 \[Correlation with most used words on recall - lm with frequency of recalled words\]
 
